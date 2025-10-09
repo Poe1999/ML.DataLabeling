@@ -1,0 +1,41 @@
+from bs4 import BeautifulSoup
+import requests
+import pandas as pd
+
+url = "https://ria.ru/"
+
+response = requests.get(url)
+soup = BeautifulSoup(response.text, 'html.parser')
+
+newss = soup.find_all('div', class_='cell-list__item')
+
+news = []
+for block in newss:
+    try:
+        title_elem = block.find('span', class_='cell-list__item-title')
+        link_elem = block.find('a', class_='cell-list__item-link')
+
+
+        href = link_elem.get('href')
+        if href.startswith('http'):
+            article_url = href
+        else:
+            article_url = 'https://ria.ru' + href
+        response2 = requests.get(article_url)
+        soup2 = BeautifulSoup(response2.text, 'html.parser')
+        #text_elem = soup2.find('div', class_='cell-list__item-announce')
+        text_elem = soup2.find('div', class_='article__text')
+
+
+        news.append({
+            'Заголовок': title_elem.text.strip() if title_elem else "Нет заголовка",
+            'Текст': text_elem.get_text() if text_elem else "Нет текста",
+            'Ссылка': article_url
+        })
+    except:
+        pass
+
+
+df = pd.DataFrame(news)
+print(df)
+print(df['Текст'])
