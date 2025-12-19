@@ -1,0 +1,158 @@
+from bs4 import BeautifulSoup
+import requests
+import pandas as pd
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from webdriver_manager.chrome import ChromeDriverManager
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
+from tensorflow.keras.preprocessing.text import Tokenizer
+import pymorphy2
+import re
+import numpy as np
+from sentence_transformers import SentenceTransformer
+
+
+chrome_options = Options()
+chrome_options.add_argument("--headless")
+chrome_options.add_argument("--no-sandbox")
+chrome_options.add_argument("--disable-dev-shm-usage")
+chrome_options.add_argument("--disable-notifications")
+
+prefs = {
+    "profile.default_content_setting_values.notifications": 2,
+    "profile.default_content_setting_values.geolocation": 2,
+    "profile.default_content_setting_values.media_stream_mic": 2,
+    "profile.default_content_setting_values.media_stream_camera": 2,
+    "profile.default_content_setting_values.popups": 2,
+    "profile.managed_default_content_settings.images": 2
+}
+chrome_options.add_experimental_option("prefs", prefs)
+driver = webdriver.Chrome(
+    service=Service(ChromeDriverManager().install()),
+    options=chrome_options)
+url = "https://ria.ru/"
+part = 'incidents'
+full_url= f'{url}{part}/'
+try:
+    driver.get(full_url)
+    wait = WebDriverWait(driver, 60)
+    wait.until(EC.presence_of_element_located((By.CLASS_NAME, "list-item")))
+    last_item = driver.find_elements(By.CLASS_NAME, "list-item")[-1]
+    driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", last_item)
+    more_button = wait.until(
+        EC.element_to_be_clickable((By.CSS_SELECTOR, ".list-more.color-btn-second-hover"))
+    )
+    more_button.click()
+    wait.until(
+        lambda d: len(d.find_elements(By.CLASS_NAME, "list-item")) >= 30
+    )
+
+    soup = BeautifulSoup(driver.page_source, 'html.parser')
+    newss = soup.find_all('div', class_='list-item')
+    news = []
+    while len(news) < 50:
+        for block in newss[:50]:
+            try:
+                title_elem = block.find('a', class_='list-item__title')
+                link_elem = block.find('a', class_='list-item__title')
+
+                href = link_elem.get('href')
+                if href.startswith('https'):
+                    art_url = href
+                else:
+                    art_url = url + href
+                response2 = requests.get(art_url)
+                soup2 = BeautifulSoup(response2.text, 'html.parser')
+                text_elem = soup2.find('div', class_='article__text')
+
+                news.append({
+                    'Заголовок': title_elem.text.strip() if title_elem else "Нет заголовка",
+                    'Текст': text_elem.get_text() if text_elem else "Нет текста"
+                })
+            except:
+                pass
+finally:
+    driver.quit()
+
+
+df = pd.DataFrame(news[:50])
+print(df)
+#print(news)
+print(df['Текст'])
+
+#2
+Vocab_size = 5000
+
+text_data = df['Текст'].tolist()
+print(text_data[0])
+
+tokenizer = Tokenizer(num_words=Vocab_size, filters='!"#$%&()*+,-–—./…:;<=>?@[\\]^_`{|}~«»\t\n\xa0\ufeff', lower=True, split=' ', oov_token='неизвестное_слово', char_level=False)
+tokenizer.fit_on_texts(text_data)
+items = list(tokenizer.word_index.items())
+print(items)
+print(len(items))
+word_counts = tokenizer.word_counts
+print(word_counts)
+x_data = tokenizer.texts_to_matrix(text_data)
+print(x_data.shape)
+print(x_data[0, :20]) # срез вектора. бэг оф вордс
+
+#3
+morph = pymorphy2.MorphAnalyzer()
+
+def lemmatize_text(text):
+    text = text.lower()
+    text = re.sub(r'[^а-яёa-z\s]', '', text)
+    words = text.split()
+    lemmas=[]
+    for word in words:
+        if len(word)<2:
+            continue
+        try:
+            p = morph.parse(word)[0]
+            lemma = p.normal_form
+            if p.tag.POS in {'NOUN', 'VERB', 'ADJF', 'ADJS'}:
+                lemmas.append(lemma)
+        except:
+            lemmas.append(word)
+    return lemmas
+df['Лемматизация'] = df['Текст'].apply(lemmatize_text)
+print(df['Лемматизация'])
+
+
+model = SentenceTransformer('cointegrated/rubert-tiny2', device='cpu')
+
+embeddings_original = model.encode(
+    df['Текст'].tolist(),
+    batch_size=8,
+    show_progress_bar=True,
+    convert_to_numpy=True
+)
+
+print(f"эмбеддинги для исходных текстов{embeddings_original.shape}")
+
+df['Лемматиз_текст'] = df['Лемматизация'].apply(lambda x: ' '.join(x) if isinstance(x, list) else '')
+embeddings_lemmatized = model.encode(
+    df['Лемматиз_текст'].tolist(),
+    batch_size=8,
+    show_progress_bar=True,
+    convert_to_numpy=True
+)
+
+print(f"эмбеддинги для лемматизированных текстов{embeddings_lemmatized.shape}")
+
+#np.save('news_embeddings_original.npy', embeddings_original)
+#np.save('news_embeddings_lemmatized.npy', embeddings_lemmatized)
+
+#df['embedding_original'] = list(embeddings_original)
+#df['embedding_lemmatized'] = list(embeddings_lemmatized)
+#df.to_pickle('news_with_embeddings.pkl')
+
+df_text = df[['Заголовок', 'Текст', 'Лемматизация', 'Лемматиз_текст']]
+df_text.to_csv('news_text_data.csv', index=False)
+
+np.save('news_embeddings_original.npy', embeddings_original)
+np.save('news_embeddings_lemmatized.csv', embeddings_lemmatized)
