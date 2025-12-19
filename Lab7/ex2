@@ -1,0 +1,36 @@
+from ultralytics import YOLO
+
+# Загрузка предобученной модели
+model_baseline = YOLO("yolov8n.pt")
+
+results_baseline = model_baseline.train(
+    data="orig_dataset/data.yaml",
+    epochs=10,
+    imgsz=640,
+    batch=8,
+    name="yolo_baseline",
+    patience=10  # Ранняя остановка при отсутствии улучшений
+)
+
+model_aug = YOLO("yolov8n.pt")
+
+results_aug = model_aug.train(
+    data="aug_dataset/data.yaml",
+    epochs=10,
+    imgsz=640,
+    batch=8,
+    name="yolo_aug",
+    patience=10
+)
+
+# Валидация на тестовой выборке
+metrics_baseline = model_baseline.val(data="orig_dataset/data.yaml", split="val")
+metrics_aug = model_aug.val(data="aug_dataset/data.yaml", split="val")
+
+print(f"Baseline mAP@0.5: {metrics_baseline.results_dict['metrics/mAP50(B)']:.3f}")
+print(f"Baseline Precision: {metrics_baseline.results_dict['metrics/precision(B)']:.3f}")
+print(f"Baseline Recall: {metrics_baseline.results_dict['metrics/recall(B)']:.3f}")
+
+print(f"\nAugmented mAP@0.5: {metrics_aug.results_dict['metrics/mAP50(B)']:.3f}")
+print(f"Augmented Precision: {metrics_aug.results_dict['metrics/precision(B)']:.3f}")
+print(f"Augmented Recall: {metrics_aug.results_dict['metrics/recall(B)']:.3f}")
